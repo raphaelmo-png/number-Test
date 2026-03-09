@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理後台 - Number Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 2rem;
+            background-color: #f4f7f6;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            margin-top: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .danger {
+            background-color: #ff4d4d;
+            color: white;
+        }
+
+        .normal {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+
+        .realtime-indicator {
+            font-size: 0.8rem;
+            color: #4CAF50;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .dot {
+            height: 8px;
+            width: 8px;
+            background-color: #4CAF50;
+            border-radius: 50%;
+            display: inline-block;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+            0% {
+                opacity: 0.3;
+            }
+
+            50% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0.3;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>
+            數據監控中心
+            <span class="realtime-indicator" id="rtStatus">
+                <span class="dot"></span> Realtime 已啟用
+            </span>
+        </h1>
+        <p>顯示最新 50 筆紀錄。當數值 &ge; 55 時標示為危險。</p>
+
+        <table id="numbersTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>數值</th>
+                    <th>狀態</th>
+                    <th>建立時間</th>
+                </tr>
+            </thead>
+            <tbody id="numbersBody">
+                <!-- 資料將由 JS 填入 -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const SUPABASE_URL = "{{ supabase_url }}";
+        const SUPABASE_ANON_KEY = "{{ supabase_anon_key }}";
+
+        let client;
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+            client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        }
+
+        async function fetchInitialData() {
+            try {
+                const response = await fetch('/api/numbers');
+                const data = await response.json();
+                renderTable(data);
+            } catch (err) {
+                console.error("載入初始資料失敗", err);
+            }
+        }
+
+        function renderTable(data, append = false) {
+            const tbody = document.getElementById('numbersBody');
+            if (!append) tbody.innerHTML = '';
+
+            const rows = data.map(item => createRow(item));
+            if (append) {
+                rows.reverse().forEach(row => tbody.prepend(row));
+                // 保持最多 50 筆
+                while (tbody.rows.length > 50) {
+                    tbody.deleteRow(tbody.rows.length - 1);
+                }
+            } else {
+                rows.forEach(row => tbody.appendChild(row));
+            }
+        }
+
+        function createRow(item) {
+            const tr = document.createElement('tr');
+            const isDanger = item.value >= 55;
+            const statusText = isDanger ? '危險' : '正常';
+            const statusClass = isDanger ? 'danger' : 'normal';
+
+            const date = new Date(item.created_at).toLocaleString();
+
+            tr.innerHTML = `
+                <td>${item.id}</td>
+                <td><strong>${item.value}</strong></td>
+                <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                <td>${date}</td>
+            `;
+            return tr;
+        }
+
+        async function setupRealtime() {
+            if (!client) {
+                document.getElementById('rtStatus').innerHTML = '<span style="color:red">Realtime 未設定</span>';
+                return;
+            }
+
+            const channel = client
+                .channel('db-changes')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'numbers' }, payload => {
+                    console.log('新資料:', payload.new);
+                    renderTable([payload.new], true);
+                })
+                .subscribe((status) => {
+                    console.log('訂閱狀態:', status);
+                    if (status !== 'SUBSCRIBED') {
+                        document.getElementById('rtStatus').style.color = 'orange';
+                        document.getElementById('rtStatus').textContent = 'Realtime 連線中...';
+                    }
+                });
+        }
+
+        fetchInitialData();
+        setupRealtime();
+    </script>
+</body>
+
+</html>
