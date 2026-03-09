@@ -4,3 +4,4 @@ supabase
 python-dotenv
 pydantic
 python-multipart
+jinja2
